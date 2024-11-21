@@ -54,8 +54,6 @@ def run(args):
         elif model_str == "cnn":
             if "MNIST" in args.dataset:
                 args.model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=1024).to(args.device)
-            else:
-                args.model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=10816).to(args.device)
 
         print(f"模型：")
         print(args.model)
@@ -104,7 +102,7 @@ if __name__ == "__main__":
                         help="数据集中类别的数量")
     parser.add_argument('-m', "--model", type=str, default="resnet8",
                         help="使用的模型架构，例如 'cnn'（卷积神经网络）或其他模型")
-    parser.add_argument('-lbs', "--batch_size", type=int, default=100,
+    parser.add_argument('-lbs', "--batch_size", type=int, default=100, # models.py中也定义了，记得调整
                         help="本地训练时的批处理大小，即每次训练中处理的数据样本数量")
     parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.1,
                         help="本地训练的学习率")
@@ -167,8 +165,8 @@ if __name__ == "__main__":
     parser.add_argument('-bt', "--beta", type=float, default=100) # β：其他客户端对关键参数的帮助程度，β越大，对关键参数的帮助就越大
     parser.add_argument('-tau', "--tau", type=float, default=0.5) # 关键参数比例
     # FedDBE
-    parser.add_argument('-mo', "--momentum", type=float, default=0.1)
-    parser.add_argument('-klw', "--kl_weight", type=float, default=0.0)
+    parser.add_argument('-mo', "--momentum", type=float, default=0.1) #
+    parser.add_argument('-klw', "--kl_weight", type=float, default=0.0) # 平均正则化项MR的权重
 
 
     # 存储解析后的命令行参数

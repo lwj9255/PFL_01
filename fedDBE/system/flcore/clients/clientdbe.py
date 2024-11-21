@@ -1,19 +1,4 @@
-# PFLlib: Personalized Federated Learning Algorithm Library
-# Copyright (C) 2021  Jianqing Zhang
 
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import torch
 import torch.nn as nn
@@ -29,33 +14,50 @@ class clientDBE(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
 
-        self.klw = args.kl_weight
+        self.klw = args.kl_weight # 正则化项的权重
         self.momentum = args.momentum
         self.global_mean = None
 
-        trainloader = self.load_train_data()        
+        trainloader = self.load_train_data() # 获得DataLoader
         for x, y in trainloader:
-            if type(x) == type([]):
-                x[0] = x[0].to(self.device)
-            else:
-                x = x.to(self.device)
+
+            # if type(x) == type([]): 用mnist、cifar等数据集，x不会是一个列表，因此注释掉
+            #     x[0] = x[0].to(self.device)
+            # else:
+            #     x = x.to(self.device)
+
+            x = x.to(self.device) # 将输入数据和标签移动到指定设备上（例如 GPU），以加速计算
             y = y.to(self.device)
-            with torch.no_grad():
-                rep = self.model.base(x).detach()
-            break
-        self.running_mean = torch.zeros_like(rep[0])
+            with torch.no_grad(): # 为了计算初始特征表示，不需要梯度计算
+                rep = self.model.base(x).detach() # 初始化时先通过模型的基础部分输入本地数据得到初始特征表示rep
+                                                  # .detach()用于将张量从计算图中分离出来，以确保不会记录用于反向传播的梯度
+                                                  # 这里的base就是去掉了fc层的FedAvgCNN模型，因此rep的维度为 (batch_size, 512)
+            break # break：只需要处理一个批次的数据来初始化，因此取到第一个批次后直接跳出循环
+
+        self.running_mean = torch.zeros_like(rep[0]) # rep[0] 表示从批次中选择第一个样本的初始特征表示，维度是(512,)
+                                                     # 创建一个和 rep[0] 形状相同的全0向量
+
+        # num_batches_tracked 用于跟踪已经处理的批次数量，张量，初始值为 0
         self.num_batches_tracked = torch.tensor(0, dtype=torch.long, device=self.device)
 
+        # client_mean 用于存储客户端特征均值的可训练参数
+        # torch.zeros_like(rep[0]) 与 running_mean一样，是一个维度(512,)的全0向量
+        # Variable() 用于包装张量，以便追踪其计算图并计算梯度
+        # nn.Parameter() 用于创建可学习参数，意味着它会成为模型的一部分，并且会在训练过程中被更新。
         self.client_mean = nn.Parameter(Variable(torch.zeros_like(rep[0])))
+
+        # opt_client_mean 是一个优化器，用于优化客户端的特征均值 client_mean
+        # [self.client_mean]中的[]表示将 client_mean 作为需要更新的参数传递给优化器
         self.opt_client_mean = torch.optim.SGD([self.client_mean], lr=self.learning_rate)
 
 
     def train(self):
-        trainloader = self.load_train_data()
-        # self.model.to(self.device)
-        self.model.train()
+        trainloader = self.load_train_data() # 上面其实已经获取过了，是为了获取rep的形状来设置 running_mean 和 client_mean
+                                             # 这里再获取一次，为了正式开始训练过程，说是分开管理比较好
 
-        start_time = time.time()
+        self.model.train() # 将模型设置为训练模式。这样可以确保在训练时启用 dropout 和 batch normalization
+
+        start_time = time.time() # 记录训练开始时间
 
         max_local_epochs = self.local_epochs
         if self.train_slow:

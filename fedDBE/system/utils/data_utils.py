@@ -6,7 +6,7 @@ import torch
 def read_data(dataset, idx, is_train=True):
     if is_train:
         # 如果是训练
-        # os.path.join 函数将不同路径拼接成一个完整的路径
+        # os.path.join 函数将不同路径拼接成一个完整的路径，最后会拼成当前目录的上级下的dataset/{dataset}/train/
         train_data_dir = os.path.join('../dataset', dataset, 'train/')
         # 拼接文件名，路径+客户端编号+.npz后缀
         train_file = train_data_dir + str(idx) + '.npz'
@@ -36,10 +36,6 @@ def read_data(dataset, idx, is_train=True):
 def read_client_data(dataset, idx, is_train=True):
     # idx是客户端索引，表明需要读取哪个客户端的数据
     # is_train为true表明读取训练数据，为false表明读取测试数据
-    if "News" in dataset:
-        return read_client_data_text(dataset, idx, is_train)
-    elif "Shakespeare" in dataset:
-        return read_client_data_Shakespeare(dataset, idx)
 
     if is_train:
         train_data = read_data(dataset, idx, is_train)
