@@ -42,7 +42,7 @@ class Client(object):
         # 客户端的额外配置
         self.train_slow = kwargs['train_slow']  # 是否慢训练
         self.send_slow = kwargs['send_slow']  # 是否慢发送
-        self.train_time_cost = {'num_rounds': 0, 'total_cost': 0.0}  # 本地训练的时间成本
+        self.train_time_cost = {'训练的轮次数': 0, '累计训练所花费的总时间': 0.0}  # 本地训练的时间成本
         self.send_time_cost = {'num_rounds': 0, 'total_cost': 0.0}  # 数据发送的时间成本
 
         self.loss = nn.CrossEntropyLoss()  # 定义交叉熵损失函数

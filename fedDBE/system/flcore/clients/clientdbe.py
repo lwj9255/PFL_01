@@ -14,8 +14,8 @@ class clientDBE(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
 
-        self.klw = args.kl_weight # 正则化项的权重
-        self.momentum = args.momentum
+        self.klw = args.kl_weight # 正则化项MR的权重κ
+        self.momentum = args.momentum # 动量超参数μ，控制当前批次对均值估计的贡献
         self.global_mean = None
 
         trainloader = self.load_train_data() # 获得DataLoader
@@ -34,6 +34,7 @@ class clientDBE(Client):
                                                   # 这里的base就是去掉了fc层的FedAvgCNN模型，因此rep的维度为 (batch_size, 512)
             break # break：只需要处理一个批次的数据来初始化，因此取到第一个批次后直接跳出循环
 
+        # running_mean 用于跟踪当前客户端的特征均值
         self.running_mean = torch.zeros_like(rep[0]) # rep[0] 表示从批次中选择第一个样本的初始特征表示，维度是(512,)
                                                      # 创建一个和 rep[0] 形状相同的全0向量
 
@@ -59,60 +60,87 @@ class clientDBE(Client):
 
         start_time = time.time() # 记录训练开始时间
 
-        max_local_epochs = self.local_epochs
-        if self.train_slow:
-            max_local_epochs = np.random.randint(1, max_local_epochs // 2)
+        max_local_epochs = self.local_epochs # 设定本地训练轮次
 
-        self.reset_running_stats()
+        # if self.train_slow: 是否慢训练，默认是关的
+        #     max_local_epochs = np.random.randint(1, max_local_epochs // 2)
+
+        self.reset_running_stats() # 重置运行中的统计信息（清零running_mean特征均值和num_batches_tracked已经处理的批次数量）
+
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(trainloader):
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
+                x = x.to(self.device)
                 y = y.to(self.device)
-                if self.train_slow:
-                    time.sleep(0.1 * np.abs(np.random.rand()))
-                    
-                # ====== begin
-                rep = self.model.base(x)
-                running_mean = torch.mean(rep, dim=0)
+                # ====== 训练过程开始 ======
+                rep = self.model.base(x)  # 使用基础部分计算特征表示
+                running_mean = torch.mean(rep, dim=0)  # 计算当前批次特征的均值
+                                                       # rep为(batch_size, 512)
+                                                       # rep = [
+                                                       #   [0.1, 0.3, 0.5, ..., 0.7],  # 第1个样本的特征向量
+                                                       #   [0.2, 0.1, 0.6, ..., 0.8],  # 第2个样本的特征向量
+                                                       #   。。。。。。。。。。。。。。。
+                                                       #   [0.4, 0.5, 0.4, ..., 0.6]   # 第batch_size个样本的特征向量
+                                                       # ]
+                                                       # dim=0计算的是批次维度的均值，得到每个特征在当前batch_size个样本中的均值
+                                                       # running_mean = [
+                                                       #   mean(0.1, 0.2,..., 0.4),  # 第 1 个特征位置的均值
+                                                       #   mean(0.3, 0.1, ...,0.5),  # 第 2 个特征位置的均值
+                                                       #   mean(0.5, 0.6, ...,0.4),  # 第 3 个特征位置的均值
+                                                       #   ...
+                                                       #   mean(0.7, 0.8, ...,0.6)   # 第 512 个特征位置的均值
+                                                       # ]
 
-                if self.num_batches_tracked is not None:
-                    self.num_batches_tracked.add_(1)
+                # 更新已经处理的批次数量
+                if self.num_batches_tracked is not None: # 确保这个变量已经被正确初始化
+                    self.num_batches_tracked.add_(1) # 已经处理的批次数量+1
 
-                self.running_mean = (1-self.momentum) * self.running_mean + self.momentum * running_mean
-                
+                # 用文献中的公式9更新表示均值z_g，z_g = (1-μ)*z_g_old + μ*z_g_new
+                # running_mean是上面计算的新的表示均值 z_g_new
+                # self.running_mean是上一轮的表示均值 z_g_old
+                # self.momentum就是动量超参数 μ，初始化时就定义好了的，值在主函数里设置
+                self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * running_mean
+
                 if self.global_mean is not None:
-                    reg_loss = torch.mean(0.5 * (self.running_mean - self.global_mean)**2)
+                    # 计算正则化损失
+                    reg_loss = torch.mean(0.5 * (self.running_mean - self.global_mean) ** 2)
+                    # 将特征与客户端均值结合，通过模型的头部得到最终输出
                     output = self.model.head(rep + self.client_mean)
-                    loss = self.loss(output, y)
-                    loss = loss + reg_loss * self.klw
+                    # 计算总损失
+                    loss = self.loss(output, y) + reg_loss * self.klw
                 else:
+                    # 没有全局均值时，也就是初始化阶段，直接通过模型的头部计算输出
                     output = self.model.head(rep)
                     loss = self.loss(output, y)
-                # ====== end
+                # ====== 训练过程结束 ======
 
-                self.opt_client_mean.zero_grad()
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                self.opt_client_mean.step()
+                # 梯度清零与反向传播
+                # opt_client_mean在上面定义的，负责的参数是client_mean
+                self.opt_client_mean.zero_grad()  # 清零 opt_client_mean优化器 的梯度
+
+                # self.optimizer在base类中定义好了，是一个SGD优化器，负责的参数是模型的基础部分以及头部部分
+                self.optimizer.zero_grad()  # 清零 optimizer优化器 的梯度
+
+                loss.backward()  # 反向传播计算梯度
+
+                self.optimizer.step()  # 更新模型的基础部分以及头部部分参数
+                self.opt_client_mean.step()  # 更新 client_mean 参数
+
+                # 把running_mean从计算图中分离，作为一个统计张量，每轮计算完都从计算图中分离，避免计算图的膨胀
                 self.detach_running()
 
-        # self.model.cpu()
+        # if self.learning_rate_decay: # 是否开启学习率衰减，默认是不开启的
+        #     self.learning_rate_scheduler.step()
 
-        if self.learning_rate_decay:
-            self.learning_rate_scheduler.step()
-
-        self.train_time_cost['num_rounds'] += 1
-        self.train_time_cost['total_cost'] += time.time() - start_time
+        self.train_time_cost['训练的轮次数'] += 1
+        self.train_time_cost['累计训练所花费的总时间'] += time.time() - start_time
 
 
-    def reset_running_stats(self):
-        self.running_mean.zero_()
-        self.num_batches_tracked.zero_()
+    # 重置训练时的统计信息
+    def reset_running_stats(self): # 。zero_()用于将张量的所有元素重置为零
+        self.running_mean.zero_() # 重置均值统计
+        self.num_batches_tracked.zero_() # 重新开始计数
 
+    # 把 running_mean 从计算图中分离
     def detach_running(self):
         self.running_mean.detach_()
 
