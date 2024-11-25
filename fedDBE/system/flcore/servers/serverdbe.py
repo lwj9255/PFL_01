@@ -62,23 +62,23 @@ class FedDBE(Server):
             for client in self.selected_clients:
                 client.train()
 
-            # threads = [Thread(target=client.train)
-            #            for client in self.selected_clients]
-            # [t.start() for t in threads]
-            # [t.join() for t in threads]
+            self.receive_models() # 获得客户端上传的模型参数以及聚合时的权重
 
-            self.receive_models()
-            self.aggregate_parameters()
+            self.aggregate_parameters() # 根据权重聚合客户端上传的模型
 
-            self.Budget.append(time.time() - s_t)
-            print('-'*25, 'time cost', '-'*25, self.Budget[-1])
+            self.Budget.append(time.time() - s_t) # 计算当前轮次的总耗时
 
+            print('-'*25, '本轮总耗时', '-'*25, self.Budget[-1])
+
+            # rs_test_acc:测试准确率
+            # top_cnt：预期准确率，默认是100
+            # 当自动停止auto_break打开且满足预期条件，则停止训练，auto_break默认是false
             if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
                 break
 
-        print("\nBest accuracy.")
+        print("\n测试集最佳准确率")
         print(max(self.rs_test_acc))
-        print("\nAverage time cost per round.")
+        print("\n每轮的平均时间成本")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
         self.save_results()

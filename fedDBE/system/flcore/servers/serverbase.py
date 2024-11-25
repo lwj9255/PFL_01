@@ -136,54 +136,59 @@ class Server(object):
 
             client.set_parameters(self.global_model)
 
-            client.send_time_cost['num_rounds'] += 1
-            client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
+            client.send_time_cost['发送的轮次数'] += 1
+            client.send_time_cost['累计发送所花费的总时间'] += 2 * (time.time() - start_time)
 
     def receive_models(self):
-        assert (len(self.selected_clients) > 0)
+        assert (len(self.selected_clients) > 0) # 选中的客户端数量大于0才会执行
 
-        active_clients = random.sample(
-            self.selected_clients, int((1 - self.client_drop_rate) * self.current_num_join_clients))
+        # client_drop_rate：客户端掉线率，默认为0。current_num_join_clients
+        # current_num_join_clients = num_join_clients：实时参与的客户端数量，如果设置了随机，则会改动
+        # 默认是不掉线不随机的，所以活跃客户端就是所有客户端
+        active_clients = random.sample(self.selected_clients, int((1 - self.client_drop_rate) * self.current_num_join_clients))
 
-        # 上传客户端的ID
-        self.uploaded_ids = []
-        # 训练样本数量
-        self.uploaded_weights = []
-        self.uploaded_models = []
-        # 总样本数量
-        tot_samples = 0
+        self.uploaded_ids = [] # 上传客户端的ID
+
+        self.uploaded_weights = [] # 聚合时的权重
+
+        self.uploaded_models = [] # 上传的模型列表
+
+        tot_samples = 0 # 总样本数量
 
         for client in active_clients:
-            try:
-                client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
-                                   client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
-            except ZeroDivisionError:
+
+            try: # 计算客户端平均每轮花费时间：训练+发送
+                client_time_cost = client.train_time_cost['累计训练所花费的总时间'] / client.train_time_cost['训练的轮次数'] + \
+                                   client.send_time_cost['累计发送所花费的总时间'] / client.send_time_cost['发送的轮次数']
+            except ZeroDivisionError: # 捕获 ZeroDivisionError，即如果训练轮数或者发送轮数为 0，则将 client_time_cost 设置为 0，避免除以零的错误
                 client_time_cost = 0
-            if client_time_cost <= self.time_threthold:
-                # 累加客户端的训练样本数量
-                tot_samples += client.train_samples
-                # 上传的客户端id放入列表
-                self.uploaded_ids.append(client.id)
-                # 往权重列表中添加训练样本数量
-                self.uploaded_weights.append(client.train_samples)
-                self.uploaded_models.append(client.model)
+
+            if client_time_cost <= self.time_threthold: # time_threthold：慢客户端的时间阈值，当客户端训练时间超过该值时，会被认为是慢客户端并可能被丢弃，默认为10000
+
+                tot_samples += client.train_samples # 累加客户端的训练样本数量
+
+                self.uploaded_ids.append(client.id) # 上传的客户端id放入列表
+
+                self.uploaded_weights.append(client.train_samples) # 往权重列表中添加训练样本数量，用于后续根据训练样本数量计算权重
+
+                self.uploaded_models.append(client.model) # 往上传的模型列表中添加模型
+
         for i, w in enumerate(self.uploaded_weights):
-            # 计算出了模型聚合时的权重占比
-            self.uploaded_weights[i] = w / tot_samples
+            self.uploaded_weights[i] = w / tot_samples # 计算出了模型聚合时的权重占比
 
     def aggregate_parameters(self):
         assert (len(self.uploaded_models) > 0)
-        # 为了简化初始化，创建第一个客户端模型的副本作为全局模型的基础结构
-        self.global_model = copy.deepcopy(self.uploaded_models[0])
-        # 将全局模型中所有参数的值设为0
-        for param in self.global_model.parameters():
-            param.data.zero_()
-        # zip将权重占比和模型进行配对
-        for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
-            self.add_parameters(w, client_model)
 
-    def add_parameters(self, w, client_model):
-        for server_param, client_param in zip(self.global_model.parameters(), client_model.parameters()):
+        self.global_model = copy.deepcopy(self.uploaded_models[0]) # 为了简化初始化，创建第一个客户端模型的副本作为全局模型的基础结构
+
+        for param in self.global_model.parameters(): # 将全局模型中所有参数的值设为0
+            param.data.zero_()
+
+        for w, uploaded_models in zip(self.uploaded_weights, self.uploaded_models): # zip将权重占比和模型进行配对
+            self.add_parameters(w, uploaded_models) # 根据权重聚合客户端上传的模型
+
+    def add_parameters(self, w, uploaded_models):
+        for server_param, client_param in zip(self.global_model.parameters(), uploaded_models.parameters()):
             server_param.data += client_param.data.clone() * w
 
     def save_global_model(self):
