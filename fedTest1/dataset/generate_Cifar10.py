@@ -13,7 +13,7 @@ random.seed(1)
 np.random.seed(1)
 
 # 设置一些超参数
-num_clients = 40  # 设置客户端数量为 20
+num_clients = 20  # 设置客户端数量为 20
 dir_path = "Cifar10/"  # 设置数据存储目录路径为 "Cifar10/"
 
 # 数据分配的函数

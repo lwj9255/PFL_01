@@ -140,7 +140,7 @@ if __name__ == "__main__":
                         help="全局训练轮数，即所有客户端同步全局模型的总轮数")
     parser.add_argument('-ls', "--local_epochs", type=int, default=1,
                         help="每个客户端在本地训练中进行的轮次")
-    parser.add_argument('-algo', "--algorithm", type=str, default="FedDBE",
+    parser.add_argument('-algo', "--algorithm", type=str, default="FedTest01",
                         help="使用的算法，默认是'FedAvg'")
     parser.add_argument('-jr', "--join_ratio", type=float, default=1.0,
                         help="每轮中参与训练的客户端比例")
@@ -194,6 +194,9 @@ if __name__ == "__main__":
     parser.add_argument('-mo', "--momentum", type=float, default=1.0) # μ：动量超参数，控制当前批次对均值估计的贡献。
     parser.add_argument('-klw', "--kl_weight", type=float, default=50) # 平均正则化项MR的权重
 
+    # FedTest01
+    parser.add_argument('-kk', "--kk_weight", type=float, default=0.5)  # 控制阈值的松紧程度的超参数k
+    parser.add_argument('-alp', "--kk_alpha", type=float, default=0.9) # 平滑因子 alpha，通常取 0.9 或 0.99
 
     # 存储解析后的命令行参数
     args = parser.parse_args()

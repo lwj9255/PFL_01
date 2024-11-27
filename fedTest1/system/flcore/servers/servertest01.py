@@ -50,10 +50,6 @@ class FedTest01(Server):
             self.Budget.append(time.time() - s_t)
             print('-'*25, '本轮时间花费', '-'*25, self.Budget[-1])
 
-            # auto_break默认是false
-            if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
-                break
-
         print("\n最佳精度.")
         print(max(self.rs_test_acc))
 
@@ -69,12 +65,12 @@ class FedTest01(Server):
             print("\nEvaluate new clients")
             self.evaluate()
 
-    def get_customized_global_models(self): # 为客户聚合定制的全局模型以协作关键参数
+    def get_customized_global_models(self): # 为客户聚合定制的全局模型以协作敏感性参数
 
         # assert 后面跟着的条件必须是 True，如果条件为 False，程序会抛出一个 AssertionError 异常
         assert type(self.args.beta) == int and self.args.beta >= 1  # 确保 beta 参数是整数且大于等于 1
 
-        overlap_buffer = [[] for i in range(self.args.num_clients)]  # 初始化一个列表，用于存储客户端之间关键参数位置的重叠率
+        overlap_buffer = [[] for i in range(self.args.num_clients)]  # 初始化一个列表，用于存储客户端之间敏感度的相似性
 
         # 计算客户端 i 与客户端 j 之间的重叠率
         for i in range(self.args.num_clients):  # 遍历所有客户端
@@ -82,33 +78,26 @@ class FedTest01(Server):
                 if i == j:  # 跳过客户端 i 和自己之间的比较
                     continue
 
-                # 计算重叠率
-                overlap_rate = (1
-                                -
-                                torch.sum(
-                                        torch.abs( # 计算两个关键参数矩阵之间，对于每个相同位置的元素，计算它们的绝对差值。
-                                            self.clients[i].critical_parameter # 客户端 i 的关键参数掩码
-                                            .to(self.device) # 将参数传输到指定的device上进行计算，默认的是cuda
-                                            -
-                                            self.clients[j].critical_parameter # 客户端 j 的关键参数掩码
-                                            .to(self.args.device))
-                                )
-                                /
-                                float(
-                                    torch.sum(
-                                        self.clients[i].critical_parameter.to(self.args.device) # 客户端 i 的关键参数掩码
-                                    )
-                                    .cpu() * 2
-                                )
+                # 提取并展平 parameter_sensitivity 的所有参数
+                sensitivity_i = torch.cat(
+                    [param.view(-1) for param in self.clients[i].parameter_sensitivity.parameters()])
+                sensitivity_j = torch.cat(
+                    [param.view(-1) for param in self.clients[j].parameter_sensitivity.parameters()])
+
+                # 计算相似性（使用余弦相似度）
+                similarity = torch.nn.functional.cosine_similarity(
+                    sensitivity_i.to(self.device),
+                    sensitivity_j.to(self.device),
+                    dim=0
                 )
-                overlap_buffer[i].append(overlap_rate)  # 将 i 和 j 之间的重叠率保存到 overlap_buffer[i]
+                overlap_buffer[i].append(similarity.item())  # 将 i 和 j 之间的相似性保存到 overlap_buffer[i]
 
         # 计算全局阈值
         overlap_buffer_tensor = torch.tensor(overlap_buffer)  # 将 overlap_buffer 转换为 PyTorch 张量，方便后续可以利用 PyTorch 提供的高效张量操作。
         overlap_sum = overlap_buffer_tensor.sum()  # 计算所有重叠率的总和
         overlap_avg = overlap_sum / ((self.args.num_clients - 1) * self.args.num_clients)  # 计算所有客户端之间的平均重叠率 O_arg
         overlap_max = overlap_buffer_tensor.max()  # 获取最大的重叠率 O_max
-        threshold = overlap_avg + (self.epoch + 1) / self.args.beta * (overlap_max - overlap_avg)  # 计算阈值,按照fedcac中的公式
+        threshold = overlap_avg + (self.epoch + 1) / self.args.beta * (overlap_max - overlap_avg)  # 计算阈值
 
         # 为每个客户端计算定制化的全局模型
         for i in range(self.args.num_clients):  # 对每个客户端 i 进行操作
