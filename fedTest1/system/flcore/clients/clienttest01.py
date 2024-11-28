@@ -36,15 +36,21 @@ class clientTest01(Client):
         self.opt_client_mean = torch.optim.SGD([self.client_mean], lr=self.learning_rate)
 
         # 初始化梯度矩阵和参数敏感度矩阵
-        self.initial_grad = copy.deepcopy(self.model)
-        self.updated_grad = copy.deepcopy(self.model)
+        self.update_grad = copy.deepcopy(self.model)
+        self.previous_grad = copy.deepcopy(self.model)
         self.parameter_sensitivity = copy.deepcopy(self.model)
-        for grad in [self.initial_grad, self.updated_grad, self.parameter_sensitivity]:
+        self.previous_parameter_sensitivity = copy.deepcopy(self.model)
+        for grad in [self.update_grad,self.previous_grad,self.parameter_sensitivity,self.previous_parameter_sensitivity]:
             for name, param in grad.named_parameters():
                 param.data.zero_()
 
 
     def train(self):
+        # 保存当前模型的参数
+        self.previous_model_params = self.model.state_dict()
+        # 保存上轮的梯度
+        self.previous_grad = copy.deepcopy(self.update_grad)
+
         trainloader = self.load_train_data()  # 加载训练数据
 
         start_time = time.time() # 记录训练开始的时间
@@ -72,21 +78,18 @@ class clientTest01(Client):
                 # ====== 反向传播 ======
                 loss.backward()  # 反向传播计算梯度
 
-                # ====== 记录 base 和 head 的梯度到 initial_grad ======
-                if self.train_time_cost['训练的轮次数'] == 0:
-                    self.initial_grad = self.record_gradients(self.initial_grad)
-                if self.train_time_cost['训练的轮次数'] > 0:
-                    self.initial_grad = copy.deepcopy(self.updated_grad)
-
                 # ====== 参数更新 ======
                 self.optimizer.step()  # 更新模型参数
                 self.opt_client_mean.step()  # 更新 client_mean 参数
 
         # ====== 在整个训练结束后，记录最后一轮的梯度到 updated_grad ======
-        self.updated_grad = self.record_gradients(self.updated_grad)
+        self.record_gradients(self.update_grad)
 
-        # 计算参数敏感度
-        self.calculate_sensitivity(self.initial_grad, self.updated_grad)
+        print(f"\n客户端训练总轮次数: {self.train_time_cost['训练的轮次数']}")
+
+        # 第一次不计算参数敏感度
+        if self.train_time_cost['训练的轮次数'] > 0:
+            self.calculate_sensitivity()
 
         # # 选择关键参数
         # self.critical_parameter, self.global_mask, self.local_mask = self.evaluate_critical_parameter(
@@ -99,66 +102,48 @@ class clientTest01(Client):
 
     # 记录base和head的梯度
     def record_gradients(self, grad_storage):
-        # 记录梯度到指定的存储中（initial_grad 或 updated_grad）
-        for (name, param), (_, grad) in zip(self.model.named_parameters(), grad_storage.named_parameters()):
+        # 计算当前模型参数与上一轮模型参数的差异
+        for (name, param), (_, prev_param) in zip(self.model.named_parameters(), self.previous_model_params.items()):
             if param.grad is not None:
-                grad.data.copy_(param.grad)  # 将当前的梯度拷贝到指定的存储中
-        return grad_storage
+                # 计算当前参数和上一轮参数的差异
+                param_diff = param.data - prev_param.data
+                # 将这个差异作为梯度保存到 grad_storage 中
+                grad_storage[name].data.copy_(param_diff)
 
     # 计算参数敏感度
-    def calculate_sensitivity(self, initial_grad, updated_grad):
-        if self.train_time_cost['训练的轮次数'] > 0:
-            # 保存当前的参数敏感度矩阵，作为上一轮的参数敏感度
-            previous_parameter_sensitivity = {name: param.data.clone() for name, param in
-                                              self.parameter_sensitivity.named_parameters()}
+    def calculate_sensitivity(self):
+        # 计算当前梯度和上一轮梯度的差异
+        grad_diff = {}
+        for (name, param), (_, prev_param) in zip(self.update_grad.named_parameters(),
+                                                  self.previous_grad.named_parameters()):
+            if param.grad is not None and prev_param.grad is not None:
+                grad_diff[name] = param.grad.data - prev_param.grad.data
 
-        # 计算梯度变化并更新当前轮次的敏感度矩阵
-        for (name, initial_grad_param), (_, updated_grad_param), (_, sensitivity) in zip(
-                initial_grad.named_parameters(),
-                updated_grad.named_parameters(),
-                self.parameter_sensitivity.named_parameters()):
-            gradient_change = updated_grad_param.data - initial_grad_param.data
-            sensitivity.data.copy_(torch.abs(gradient_change))
+                # 计算参数敏感度：梯度差异除以当前参数的绝对值
+                if param.data.abs().sum() != 0:  # 防止除以零
+                    self.parameter_sensitivity[name] = grad_diff[name] / param.data.abs().sum()
+                else:
+                    self.parameter_sensitivity[name] = grad_diff[name]  # 如果参数为0，直接使用绝对值差异
 
-        # 计算梯度变化的均值和标准差
-        all_grad_changes = torch.cat(
-            [param.data.view(-1) for name, param in self.parameter_sensitivity.named_parameters()])
-        mean_grad_change = all_grad_changes.mean()
-        std_grad_change = all_grad_changes.std()
+                # 滑动加权：alpha * 当前敏感度 + (1 - alpha) * 上一轮敏感度
+                self.parameter_sensitivity[name] = self.alpha * self.parameter_sensitivity[name] + (
+                            1 - self.alpha) * self.previous_parameter_sensitivity[name]
 
-        # 计算参数值的均值和标准差
-        all_params = torch.cat(
-            [param.data.view(-1) for name, param in self.model.named_parameters()])
-        mean_param_value = all_params.abs().mean()
-        std_param_value = all_params.abs().std()
+        # 将当前轮的参数敏感度保存为下一轮的上一轮敏感度
+        self.previous_parameter_sensitivity = copy.deepcopy(self.parameter_sensitivity)
 
-        # 对每个参数计算标准化的敏感度
-        for (name, sensitivity), (_, param) in zip(self.parameter_sensitivity.named_parameters(),
-                                                   self.model.named_parameters()):
-            normalized_grad_change = (sensitivity.data - mean_grad_change) / (std_grad_change + 1e-8)  # 添加小数以防除零
-            normalized_param_value = (param.data.abs() - mean_param_value) / (std_param_value + 1e-8)
-            sensitivity.data.copy_(normalized_grad_change * normalized_param_value)
+        # 归一化参数敏感度
+        max_sensitivity = max([sensitivity.max().item() for sensitivity in self.parameter_sensitivity.values()])
+        min_sensitivity = min([sensitivity.min().item() for sensitivity in self.parameter_sensitivity.values()])
 
-        # 归一化敏感度矩阵到 [0, 1]
-        all_sensitivities = torch.cat(
-            [param.data.view(-1) for name, param in self.parameter_sensitivity.named_parameters()])
-        min_sensitivity = all_sensitivities.min()
-        max_sensitivity = all_sensitivities.max()
-
-        for name, sensitivity in self.parameter_sensitivity.named_parameters():
-            sensitivity.data.copy_((sensitivity.data - min_sensitivity) / (max_sensitivity - min_sensitivity + 1e-8))
-
-        if self.train_time_cost['训练的轮次数'] > 0:
-            # 对新旧敏感度矩阵进行滑动加权聚合
-            for (name, sensitivity) in self.parameter_sensitivity.named_parameters():
-                previous_sensitivity = previous_parameter_sensitivity[name]
-                sensitivity.data.copy_((1 - self.alpha) * previous_sensitivity + self.alpha * sensitivity.data)
-
-
+        # 归一化到[0, 1]范围
+        for name, sensitivity in self.parameter_sensitivity.items():
+            if max_sensitivity - min_sensitivity != 0:
+                self.parameter_sensitivity[name] = (sensitivity - min_sensitivity) / (max_sensitivity - min_sensitivity)
 
     # 设置模型参数
     def set_parameters(self, model):
-        if self.parameter_sensitivity is not None:  # 如果敏感度矩阵不为空，说明需要使用敏感度矩阵调整模型参数
+        if self.train_time_cost['训练的轮次数'] > 0:  # 如果训练轮次>0，说明已经计算出了参数敏感度矩阵了
 
             index = 0  # 初始化索引，用于遍历每个模型参数
             # 使用zip将当前模型(self.model)、传入的模型(model)和定制的模型(self.customized_model)的参数配对
@@ -183,7 +168,6 @@ class clientTest01(Client):
                 index += 1
 
         else:
-            # 如果本地掩码为空，直接调用父类Client中的set_parameters方法
             super().set_parameters(model)
 
     # 评估关键参数

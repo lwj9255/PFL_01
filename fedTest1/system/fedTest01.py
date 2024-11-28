@@ -74,6 +74,8 @@ def run(args):
         elif model_str == "cnn":
             if "MNIST" in args.dataset:
                 args.model = FedAvgCNN(in_features=1, num_classes=args.num_classes, dim=1024).to(args.device)
+            elif "Cifar10" in args.dataset:
+                args.model = FedAvgCNN(in_features=3, num_classes=args.num_classes, dim=1600).to(args.device)
 
         print(f"模型：")
         print(args.model)
@@ -122,13 +124,13 @@ if __name__ == "__main__":
                         choices=["nv", "cuda"])
     parser.add_argument('-did', "--device_id", type=str, default="0",
                         help="当有多个GPU时，使用哪个")
-    parser.add_argument('-data', "--dataset", type=str, default="MNIST",
+    parser.add_argument('-data', "--dataset", type=str, default="Cifar10",
                         help="使用的数据集名称")
     parser.add_argument('-nb', "--num_classes", type=int, default=10,
                         help="数据集中类别的数量")
-    parser.add_argument('-m', "--model", type=str, default="cnn",
+    parser.add_argument('-m', "--model", type=str, default="resnet8",
                         help="使用的模型架构，例如 'cnn'（卷积神经网络）或其他模型")
-    parser.add_argument('-lbs', "--batch_size", type=int, default=10, # models.py中也定义了，记得调整
+    parser.add_argument('-lbs', "--batch_size", type=int, default=100, # models.py中也定义了，记得调整
                         help="本地训练时的批处理大小，即每次训练中处理的数据样本数量")
     parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.1,
                         help="本地训练的学习率")
@@ -146,7 +148,7 @@ if __name__ == "__main__":
                         help="每轮中参与训练的客户端比例")
     parser.add_argument('-rjr', "--random_join_ratio", type=bool, default=False,
                         help="是否随机选择每轮参与训练的客户端比例")
-    parser.add_argument('-nc', "--num_clients", type=int, default=20,
+    parser.add_argument('-nc', "--num_clients", type=int, default=40,
                         help="总的客户端数量")
     parser.add_argument('-pv', "--prev", type=int, default=0,
                         help="之前的运行次数")

@@ -129,7 +129,7 @@ class FedTest01(Server):
 
     # 发送模型给客户端
     def send_models(self):
-        if self.epoch != 0:  # 如果当前不是第0轮（即训练不是刚开始时）
+        if self.epoch > 1:  # 如果当前不是第1轮
             self.get_customized_global_models()  # 获取定制化的全局模型
 
         super().send_models()  # 调用父类 Server 的 send_models 方法

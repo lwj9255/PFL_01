@@ -4,7 +4,7 @@ import numpy as np  # 导入numpy，用于数组操作和数学计算
 import gc  # 导入垃圾回收模块，用于管理内存
 from sklearn.model_selection import train_test_split  # 从sklearn库导入train_test_split，用于数据集划分
 
-batch_size = 10  # 默认批次大小
+batch_size = 100  # 默认批次大小
 train_ratio = 0.75  # 训练集与测试集的划分比例
 alpha = 0.1  # Dirichlet分布的超参数（用于非独立同分布数据生成）
 # alpha较小时，数据分布非均匀，增强non-IID，推荐0.1是dir分配
