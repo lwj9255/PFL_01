@@ -80,9 +80,9 @@ class FedTest01(Server):
 
                 # 提取并展平 parameter_sensitivity 的所有参数
                 sensitivity_i = torch.cat(
-                    [param.view(-1) for param in self.clients[i].parameter_sensitivity.parameters()])
+                    [param.view(-1) for param in self.clients[i].parameter_sensitivity.values()])# .values()访问字典中的所有值
                 sensitivity_j = torch.cat(
-                    [param.view(-1) for param in self.clients[j].parameter_sensitivity.parameters()])
+                    [param.view(-1) for param in self.clients[j].parameter_sensitivity.values()])
 
                 # 计算相似性（使用余弦相似度）
                 similarity = torch.nn.functional.cosine_similarity(
@@ -90,6 +90,7 @@ class FedTest01(Server):
                     sensitivity_j.to(self.device),
                     dim=0
                 )
+
                 overlap_buffer[i].append(similarity.item())  # 将 i 和 j 之间的相似性保存到 overlap_buffer[i]
 
         # 计算全局阈值
