@@ -80,9 +80,9 @@ class FedTest01(Server):
 
                 # 提取并展平 parameter_sensitivity 的所有参数
                 sensitivity_i = torch.cat(
-                    [param.view(-1) for param in self.clients[i].parameter_sensitivity.parameters()])
+                    [param.view(-1) for param in self.clients[i].parameter_sensitivity.values()])
                 sensitivity_j = torch.cat(
-                    [param.view(-1) for param in self.clients[j].parameter_sensitivity.parameters()])
+                    [param.view(-1) for param in self.clients[j].parameter_sensitivity.values()])
 
                 # 计算相似性（使用余弦相似度）
                 similarity = torch.nn.functional.cosine_similarity(
