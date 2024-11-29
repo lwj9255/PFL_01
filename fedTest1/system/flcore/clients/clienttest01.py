@@ -142,6 +142,7 @@ class clientTest01(Client):
 
             # 将当前轮的参数敏感度保存为下一轮的上一轮敏感度
             self.previous_parameter_sensitivity = copy.deepcopy(self.parameter_sensitivity)
+            self.previous_parameter_sensitivity = copy.deepcopy(self.parameter_sensitivity)
 
             # 归一化参数敏感度
             max_sensitivity = max([sensitivity.max().item() for sensitivity in self.parameter_sensitivity.values()])
